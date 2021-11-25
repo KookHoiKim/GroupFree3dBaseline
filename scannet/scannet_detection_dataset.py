@@ -56,6 +56,7 @@ class ScannetDetectionDataset(Dataset):
                 with open(split_filenames, 'r') as f:
                     self.scan_names = f.read().splitlines()
                     # remove unavailiable scans
+            # point_cloud = mesh_vertices[:, 0:3]  # do not use color for now
                 num_scans = len(self.scan_names)
                 self.scan_names = [sname for sname in self.scan_names \
                                    if sname in all_scan_names]
@@ -74,6 +75,7 @@ class ScannetDetectionDataset(Dataset):
                 instance_labels = np.load(os.path.join(self.data_path, scan_name) + '_ins_label.npy')
                 semantic_labels = np.load(os.path.join(self.data_path, scan_name) + '_sem_label.npy')
                 instance_bboxes = np.load(os.path.join(self.data_path, scan_name) + '_bbox.npy')
+            # point_cloud = mesh_vertices[:, 0:3]  # do not use color for now
                 mesh_vertices_list.append(mesh_vertices)
                 instance_labels_list.append(instance_labels)
                 semantic_labels_list.append(semantic_labels)
@@ -192,6 +194,9 @@ class ScannetDetectionDataset(Dataset):
                 point_obj_mask[ind] = 1.0
 
         class_ind = [np.where(DC.nyu40ids == x)[0][0] for x in instance_bboxes[:, -1]]
+        sem_label = [np.where(DC.nyu40ids == x)[0][0] if x in DC.nyu40ids else -1 for x in semantic_labels]
+        # add
+        # sem_label = [np.where(DC.nyu40ids == x)[0][0] for x in semantic_labels]
         # NOTE: set size class as semantic class. Consider use size2class.
         size_classes[0:instance_bboxes.shape[0]] = class_ind
         size_residuals[0:instance_bboxes.shape[0], :] = \
@@ -215,4 +220,6 @@ class ScannetDetectionDataset(Dataset):
         ret_dict['point_instance_label'] = point_instance_label.astype(np.int64)
         ret_dict['scan_idx'] = np.array(idx).astype(np.int64)
         ret_dict['pcl_color'] = pcl_color
+        # add label information
+        ret_dict['semantic_label'] = np.array(sem_label).astype(np.int64)
         return ret_dict

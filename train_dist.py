@@ -10,6 +10,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
+from tensorboardX import SummaryWriter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = BASE_DIR
@@ -307,6 +308,7 @@ def main(args):
 
 def train_one_epoch(epoch, train_loader, DATASET_CONFIG, model, criterion, optimizer, scheduler, config):
     stat_dict = {}  # collect statistics
+    stat_dict2 = {}
     model.train()  # set model to training mode
     for batch_idx, batch_data_label in enumerate(train_loader):
         for key in batch_data_label:
@@ -344,13 +346,20 @@ def train_one_epoch(epoch, train_loader, DATASET_CONFIG, model, criterion, optim
 
         # Accumulate statistics and print out
         stat_dict['grad_norm'] = grad_total_norm
+        if 'grad_norm' not in stat_dict2:
+            stat_dict2['grad_norm'] = 0
+        stat_dict2['grad_norm'] += grad_total_norm
         for key in end_points:
             if 'loss' in key or 'acc' in key or 'ratio' in key:
-                if key not in stat_dict: stat_dict[key] = 0
+                if key not in stat_dict: 
+                    stat_dict[key] = 0
+                    stat_dict2[key] = 0
                 if isinstance(end_points[key], float):
                     stat_dict[key] += end_points[key]
+                    stat_dict2[key] += end_points[key]
                 else:
                     stat_dict[key] += end_points[key].item()
+                    stat_dict2[key] += end_points[key].item()
 
         if (batch_idx + 1) % config.print_freq == 0:
             logger.info(f'Train: [{epoch}][{batch_idx + 1}/{len(train_loader)}]  ' + ''.join(
@@ -370,6 +379,10 @@ def train_one_epoch(epoch, train_loader, DATASET_CONFIG, model, criterion, optim
 
             for key in sorted(stat_dict.keys()):
                 stat_dict[key] = 0
+
+    for key in stat_dict2.keys():
+        stat_dict2[key] /= (batch_idx + 1)
+        writer.add_scalar(key, stat_dict2[key], epoch)
 
 
 def evaluate_one_epoch(test_loader, DATASET_CONFIG, CONFIG_DICT, AP_IOU_THRESHOLDS, model, criterion, config):
@@ -474,17 +487,21 @@ if __name__ == '__main__':
     opt = parse_option()
     torch.cuda.set_device(opt.local_rank)
     torch.distributed.init_process_group(backend='nccl', init_method='env://')
-    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.enabled = False
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
 
-    LOG_DIR = os.path.join(opt.log_dir, 'group_free',
-                           f'{opt.dataset}_{int(time.time())}', f'{np.random.randint(100000000)}')
-    while os.path.exists(LOG_DIR):
-        LOG_DIR = os.path.join(opt.log_dir, 'group_free',
-                               f'{opt.dataset}_{int(time.time())}', f'{np.random.randint(100000000)}')
+    # LOG_DIR = os.path.join(opt.log_dir, 'group_free',
+    #                        f'{opt.dataset}_{int(time.time())}', f'{np.random.randint(100000000)}')
+    # while os.path.exists(LOG_DIR):
+    #     LOG_DIR = os.path.join(opt.log_dir, 'group_free',
+    #                            f'{opt.dataset}_{int(time.time())}', f'{np.random.randint(100000000)}')
+    LOG_DIR = os.path.join('log', opt.dataset, opt.log_dir)
     opt.log_dir = LOG_DIR
     os.makedirs(opt.log_dir, exist_ok=True)
+
+    global writer
+    writer = SummaryWriter(LOG_DIR)
 
     logger = setup_logger(output=opt.log_dir, distributed_rank=dist.get_rank(), name="group-free")
     if dist.get_rank() == 0:
