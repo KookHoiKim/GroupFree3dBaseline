@@ -16,7 +16,72 @@ sys.path.append(os.path.join(ROOT_DIR, 'pointnet2'))
 sys.path.append(os.path.join(ROOT_DIR, 'ops', 'pt_custom_ops'))
 
 from pointnet2_modules import PointnetSAModuleVotes, PointnetFPModule
+from .modules import PositionEmbeddingLearned
 
+class TransformerDecoderLayerPreNorm(nn.Module):
+
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
+
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout, inplace=True)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.norm_mem = nn.LayerNorm(d_model)
+
+        self.dropout1 = nn.Dropout(dropout, inplace=True)
+        self.dropout2 = nn.Dropout(dropout, inplace=True)
+        self.dropout3 = nn.Dropout(dropout, inplace=True)
+
+        self.activation = nn.ReLU(inplace=True)
+
+    def __setstate__(self, state):
+        if 'activation' not in state:
+            state['activation'] = F.relu
+        super().__setstate__(state)
+
+    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
+                tgt_key_padding_mask=None, memory_key_padding_mask=None):
+
+        tgt = self.norm1(tgt)
+        tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
+                              key_padding_mask=tgt_key_padding_mask)[0]
+        tgt = tgt + self.dropout1(tgt2)
+
+        tgt = self.norm2(tgt)
+        memory = self.norm_mem(memory)
+        tgt2, mask = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
+                                   key_padding_mask=memory_key_padding_mask)
+        tgt = tgt + self.dropout2(tgt2)
+        tgt = self.norm3(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+
+        return tgt
+
+class DecoderBlock(nn.Module):
+    def __init__(self, d_model, nhead, dim_feedforward):
+        super().__init__()
+        self.d_model=d_model
+        self.decoder = TransformerDecoderLayerPreNorm(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward) 
+        self.self_posembed = PositionEmbeddingLearned(3, d_model)
+        self.cross_posembed = PositionEmbeddingLearned(3, d_model)
+
+    def forward(self, point, point_feature, group_point, group_feature):
+        point_embed = self.self_posembed(point)
+        query = point_feature + point_embed
+        B, C, np, ns = group_point.shape
+        group_embed = self.cross_posembed(group_point.permute(0, 2, 3, 1).reshape(B*np, ns, C)).permute(2, 0, 1)
+        key = group_feature.permute(0, 2, 3, 1).reshape(-1, ns, self.d_model).transpose(0, 1) + group_embed
+        features = self.decoder(query.transpose(1, 2).reshape(-1, self.d_model).unsqueeze(0), key)
+        features = features.reshape(-1, B, np, self.d_model).transpose(2, 3).squeeze(0)
+        return features
+ 
 
 class Pointnet2Backbone(nn.Module):
     r"""
@@ -34,6 +99,7 @@ class Pointnet2Backbone(nn.Module):
         super().__init__()
         self.depth = depth
         self.width = width
+        nhead = 8
 
         self.sa1 = PointnetSAModuleVotes(
             npoint=2048,
@@ -43,6 +109,9 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
+        self.dec1 = DecoderBlock(
+            128, nhead=nhead, dim_feedforward=128*2, 
+        ) 
 
         self.sa2 = PointnetSAModuleVotes(
             npoint=1024,
@@ -52,6 +121,9 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
+        self.dec2 = DecoderBlock(
+            256, nhead=nhead, dim_feedforward=256*2, 
+        ) 
 
         self.sa3 = PointnetSAModuleVotes(
             npoint=512,
@@ -61,6 +133,9 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
+        self.dec3 = DecoderBlock(
+            256, nhead=nhead, dim_feedforward=256*2, 
+        ) 
 
         self.sa4 = PointnetSAModuleVotes(
             npoint=256,
@@ -70,6 +145,9 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
+        self.dec4 = DecoderBlock(
+            256, nhead=nhead, dim_feedforward=256*2, 
+        ) 
 
         self.fp1 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 256 * width])
         self.fp2 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 288])
@@ -108,21 +186,25 @@ class Pointnet2Backbone(nn.Module):
         xyz, features = self._break_up_pc(pointcloud)
 
         # --------- 4 SET ABSTRACTION LAYERS ---------
-        xyz, features, fps_inds = self.sa1(xyz, features)
+        xyz, features, grouped_xyz, grouped_features, fps_inds = self.sa1(xyz, features)    # grouped_features : B, C, np, ns
+        features = self.dec1(xyz, features, grouped_xyz, grouped_features).contiguous()
         end_points['sa1_inds'] = fps_inds
         end_points['sa1_xyz'] = xyz
         end_points['sa1_features'] = features
 
-        xyz, features, fps_inds = self.sa2(xyz, features)  # this fps_inds is just 0,1,...,1023
+        xyz, features, grouped_xyz, grouped_features, fps_inds = self.sa2(xyz, features)  # this fps_inds is just 0,1,...,1023
+        features = self.dec2(xyz, features, grouped_xyz, grouped_features).contiguous()
         end_points['sa2_inds'] = fps_inds
         end_points['sa2_xyz'] = xyz
         end_points['sa2_features'] = features
 
-        xyz, features, fps_inds = self.sa3(xyz, features)  # this fps_inds is just 0,1,...,511
+        xyz, features, grouped_xyz, grouped_features, fps_inds = self.sa3(xyz, features)  # this fps_inds is just 0,1,...,511
+        features = self.dec4(xyz, features, grouped_xyz, grouped_features).contiguous()
         end_points['sa3_xyz'] = xyz
         end_points['sa3_features'] = features
 
-        xyz, features, fps_inds = self.sa4(xyz, features)  # this fps_inds is just 0,1,...,255
+        xyz, features, grouped_xyz, grouped_features, fps_inds = self.sa4(xyz, features)  # this fps_inds is just 0,1,...,255
+        features = self.dec4(xyz, features, grouped_xyz, grouped_features).contiguous()
         end_points['sa4_xyz'] = xyz
         end_points['sa4_features'] = features
 

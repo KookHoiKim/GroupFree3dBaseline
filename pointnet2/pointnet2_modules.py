@@ -251,6 +251,7 @@ class PointnetSAModuleVotes(nn.Module):
         new_features = self.mlp_module(
             grouped_features
         )  # (B, mlp[-1], npoint, nsample)
+        grouped_features = new_features
         if self.pooling == 'max':
             new_features = F.max_pool2d(
                 new_features, kernel_size=[1, new_features.size(3)]
@@ -267,9 +268,9 @@ class PointnetSAModuleVotes(nn.Module):
         new_features = new_features.squeeze(-1)  # (B, mlp[-1], npoint)
 
         if not self.ret_unique_cnt:
-            return new_xyz, new_features, inds
+            return new_xyz, new_features, grouped_xyz, grouped_features, inds 
         else:
-            return new_xyz, new_features, inds, unique_cnt
+            return new_xyz, new_features, grouped_xyz, grouped_features, inds, unique_cnt
 
 class PointnetSAModuleMSGVotes(nn.Module):
     ''' Modified based on _PointnetSAModuleBase and PointnetSAModuleMSG
