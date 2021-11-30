@@ -43,16 +43,6 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
-        # self.mlp1 = nn.Conv1d(128, 128, 1)
-
-        # self.sa1_2 = PointnetSAModuleVotes(
-        #     npoint=1024,
-        #     radius=0.4,
-        #     nsample=32,
-        #     mlp=[128 * width] + [128 * width for i in range(depth)] + [288 * width],
-        #     use_xyz=True,
-        #     normalize_xyz=True
-        # )
 
         self.sa2 = PointnetSAModuleVotes(
             npoint=1024,
@@ -62,12 +52,6 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
-        self.layer2 = nn.Sequential(
-            nn.Conv1d(256, 288, 1),
-            nn.BatchNorm1d(288),
-            nn.ReLU()
-        )
-        # self.conv2 = nn.Conv1d(256, 288, 1)
 
         self.sa3 = PointnetSAModuleVotes(
             npoint=512,
@@ -76,12 +60,6 @@ class Pointnet2Backbone(nn.Module):
             mlp=[256 * width] + [128 * width for i in range(depth)] + [256 * width],
             use_xyz=True,
             normalize_xyz=True
-        )
-        # self.conv3 = nn.Conv1d(288, 288, 1)
-        self.layer3 = nn.Sequential(
-            nn.Conv1d(288, 288, 1),
-            nn.BatchNorm1d(288),
-            nn.ReLU()
         )
 
         self.sa4 = PointnetSAModuleVotes(
@@ -92,17 +70,9 @@ class Pointnet2Backbone(nn.Module):
             use_xyz=True,
             normalize_xyz=True
         )
-        # self.conv4 = nn.Conv1d(288, 288, 1)
-        self.layer4 = nn.Sequential(
-            nn.Conv1d(288, 288, 1),
-            nn.BatchNorm1d(288),
-            nn.ReLU()
-        )
 
         self.fp1 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 256 * width])
         self.fp2 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 288])
-        self.fp3_2 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 288])
-        self.fp4_2 = PointnetFPModule(mlp=[256 * width + 256 * width, 256 * width, 288])
 
     def _break_up_pc(self, pc):
         xyz = pc[..., 0:3].contiguous()
@@ -142,13 +112,11 @@ class Pointnet2Backbone(nn.Module):
         end_points['sa1_inds'] = fps_inds
         end_points['sa1_xyz'] = xyz
         end_points['sa1_features'] = features
-        # xyz1, features1, fps_inds1 = self.sa1_2(xyz, self.mlp1(features))
 
         xyz, features, fps_inds = self.sa2(xyz, features)  # this fps_inds is just 0,1,...,1023
         end_points['sa2_inds'] = fps_inds
         end_points['sa2_xyz'] = xyz
         end_points['sa2_features'] = features
-        features1 = self.layer2(features)
 
         xyz, features, fps_inds = self.sa3(xyz, features)  # this fps_inds is just 0,1,...,511
         end_points['sa3_xyz'] = xyz
@@ -157,26 +125,18 @@ class Pointnet2Backbone(nn.Module):
         xyz, features, fps_inds = self.sa4(xyz, features)  # this fps_inds is just 0,1,...,255
         end_points['sa4_xyz'] = xyz
         end_points['sa4_features'] = features
-        
 
         # --------- 2 FEATURE UPSAMPLING LAYERS --------
-        # features3 = self.fp3_2()
-        features2 = self.fp3_2(end_points['sa2_xyz'], end_points['sa3_xyz'], end_points['sa2_features'], end_points['sa3_features'])
-        features2 = self.layer3(features2)
-        features3 = self.fp4_2(end_points['sa2_xyz'], end_points['sa4_xyz'], end_points['sa2_features'], end_points['sa4_features'])
-        features3 = self.layer4(features3)
-
         features = self.fp1(end_points['sa3_xyz'], end_points['sa4_xyz'], end_points['sa3_features'],
                             end_points['sa4_features'])
         features = self.fp2(end_points['sa2_xyz'], end_points['sa3_xyz'], end_points['sa2_features'], features)
-        features4 = features
-        features = torch.cat([features1, features2, features3, features4], 1)
-
         end_points['fp2_features'] = features
         end_points['fp2_xyz'] = end_points['sa2_xyz']
         num_seed = end_points['fp2_xyz'].shape[1]
         end_points['fp2_inds'] = end_points['sa1_inds'][:, 0:num_seed]  # indices among the entire input point clouds
+
         return end_points
+
 
 if __name__ == '__main__':
     backbone_net = Pointnet2Backbone(input_feature_dim=3).cuda()
