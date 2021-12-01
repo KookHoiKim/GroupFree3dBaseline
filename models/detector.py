@@ -65,23 +65,23 @@ class GroupFreeDetector(nn.Module):
         if self.sampling == 'fps':
             self.fps_module = FPSModule(num_proposal)
         elif self.sampling == 'kps':
-            self.points_obj_cls = PointsObjClsModule(288*4)
+            self.points_obj_cls = PointsObjClsModule(288)
             self.gsample_module = GeneralSamplingModule()
         else:
             raise NotImplementedError
         # Proposal
         if self.size_cls_agnostic:
-            self.proposal_head = ClsAgnosticPredictHead(num_class, num_heading_bin, num_proposal, 288*4)
+            self.proposal_head = ClsAgnosticPredictHead(num_class, num_heading_bin, num_proposal, 288)
         else:
             self.proposal_head = PredictHead(num_class, num_heading_bin, num_size_cluster,
-                                             mean_size_arr, num_proposal, 288*4)
+                                             mean_size_arr, num_proposal, 288)
         if self.num_decoder_layers <= 0:
             # stop building if has no decoder layer
             return
 
         # Transformer Decoder Projection
-        self.decoder_key_proj = nn.Conv1d(288*4, 288*4, kernel_size=1)
-        self.decoder_query_proj = nn.Conv1d(288*4, 288*4, kernel_size=1)
+        self.decoder_key_proj = nn.Conv1d(288, 288, kernel_size=1)
+        self.decoder_query_proj = nn.Conv1d(288, 288, kernel_size=1)
 
         # Position Embedding for Self-Attention
         if self.self_position_embedding == 'none':
@@ -89,11 +89,11 @@ class GroupFreeDetector(nn.Module):
         elif self.self_position_embedding == 'xyz_learned':
             self.decoder_self_posembeds = nn.ModuleList()
             for i in range(self.num_decoder_layers):
-                self.decoder_self_posembeds.append(PositionEmbeddingLearned(3, 288*4))
+                self.decoder_self_posembeds.append(PositionEmbeddingLearned(3, 288))
         elif self.self_position_embedding == 'loc_learned':
             self.decoder_self_posembeds = nn.ModuleList()
             for i in range(self.num_decoder_layers):
-                self.decoder_self_posembeds.append(PositionEmbeddingLearned(6, 288*4))
+                self.decoder_self_posembeds.append(PositionEmbeddingLearned(6, 288))
         else:
             raise NotImplementedError(f"self_position_embedding not supported {self.self_position_embedding}")
 
@@ -103,7 +103,7 @@ class GroupFreeDetector(nn.Module):
         elif self.cross_position_embedding == 'xyz_learned':
             self.decoder_cross_posembeds = nn.ModuleList()
             for i in range(self.num_decoder_layers):
-                self.decoder_cross_posembeds.append(PositionEmbeddingLearned(3, 288*4))
+                self.decoder_cross_posembeds.append(PositionEmbeddingLearned(3, 288))
         else:
             raise NotImplementedError(f"cross_position_embedding not supported {self.cross_position_embedding}")
 
@@ -112,7 +112,7 @@ class GroupFreeDetector(nn.Module):
         for i in range(self.num_decoder_layers):
             self.decoder.append(
                 TransformerDecoderLayer(
-                    288*4, nhead, dim_feedforward, dropout, activation,
+                    288, nhead, dim_feedforward, dropout, activation,
                     self_posembed=self.decoder_self_posembeds[i],
                     cross_posembed=self.decoder_cross_posembeds[i],
                 ))
@@ -121,10 +121,10 @@ class GroupFreeDetector(nn.Module):
         self.prediction_heads = nn.ModuleList()
         for i in range(self.num_decoder_layers):
             if self.size_cls_agnostic:
-                self.prediction_heads.append(ClsAgnosticPredictHead(num_class, num_heading_bin, num_proposal, 288*4))
+                self.prediction_heads.append(ClsAgnosticPredictHead(num_class, num_heading_bin, num_proposal, 288))
             else:
                 self.prediction_heads.append(PredictHead(num_class, num_heading_bin, num_size_cluster,
-                                                         mean_size_arr, num_proposal, 288*4))
+                                                         mean_size_arr, num_proposal, 288))
 
         # Init
         self.init_weights()
