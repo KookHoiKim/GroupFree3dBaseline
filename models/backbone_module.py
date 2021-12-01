@@ -26,7 +26,7 @@ class TransformerDecoderLayerPreNorm(nn.Module):
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.dropout = nn.Dropout(dropout, inplace=True)
+        self.dropout = nn.Dropout(dropout, inplace=False)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.norm1 = nn.LayerNorm(d_model)
@@ -34,16 +34,16 @@ class TransformerDecoderLayerPreNorm(nn.Module):
         self.norm3 = nn.LayerNorm(d_model)
         self.norm_mem = nn.LayerNorm(d_model)
 
-        self.dropout1 = nn.Dropout(dropout, inplace=True)
-        self.dropout2 = nn.Dropout(dropout, inplace=True)
-        self.dropout3 = nn.Dropout(dropout, inplace=True)
+        self.dropout1 = nn.Dropout(dropout, inplace=False)
+        self.dropout2 = nn.Dropout(dropout, inplace=False)
+        self.dropout3 = nn.Dropout(dropout, inplace=False)
 
-        self.activation = nn.ReLU(inplace=True)
+        self.activation = nn.ReLU(inplace=False)
 
-    def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
-        super().__setstate__(state)
+    # def __setstate__(self, state):
+    #     if 'activation' not in state:
+    #         state['activation'] = F.relu
+    #     super().__setstate__(state)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
@@ -78,7 +78,7 @@ class DecoderBlock(nn.Module):
         B, C, np, ns = group_point.shape
         group_embed = self.cross_posembed(group_point.permute(0, 2, 3, 1).reshape(B*np, ns, C)).permute(2, 0, 1)
         key = group_feature.permute(0, 2, 3, 1).reshape(-1, ns, self.d_model).transpose(0, 1) + group_embed
-        features = self.decoder(query.transpose(1, 2).reshape(-1, self.d_model).unsqueeze(0), key)
+        features = self.decoder(query.unsqueeze(2).permute(0, 3, 2, 1).reshape(-1, 1, self.d_model).transpose(0, 1), key)
         features = features.reshape(-1, B, np, self.d_model).transpose(2, 3).squeeze(0)
         return features
  

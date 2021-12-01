@@ -54,7 +54,7 @@ class PositionEmbeddingLearned(nn.Module):
         self.position_embedding_head = nn.Sequential(
             nn.Conv1d(input_channel, num_pos_feats, kernel_size=1),
             nn.BatchNorm1d(num_pos_feats),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Conv1d(num_pos_feats, num_pos_feats, kernel_size=1))
 
     def forward(self, xyz):
