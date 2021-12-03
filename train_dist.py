@@ -91,7 +91,7 @@ def parse_option():
     parser.add_argument('--checkpoint_path', default=None, help='Model checkpoint path [default: None]')
     parser.add_argument('--log_dir', default='log', help='Dump dir to save model checkpoint [default: log]')
     parser.add_argument('--print_freq', type=int, default=10, help='print frequency')
-    parser.add_argument('--save_freq', type=int, default=100, help='save frequency')
+    parser.add_argument('--save_freq', type=int, default=50, help='save frequency')
     parser.add_argument('--val_freq', type=int, default=50, help='val frequency')
 
     # others
@@ -255,9 +255,9 @@ def main(args):
     # optimizer
     if args.optimizer == 'adamW':
         param_dicts = [
-            {"params": [p for n, p in model.named_parameters() if "decoder" not in n and p.requires_grad]},
+            {"params": [p for n, p in model.named_parameters() if "dec" not in n and p.requires_grad]},
             {
-                "params": [p for n, p in model.named_parameters() if "decoder" in n and p.requires_grad],
+                "params": [p for n, p in model.named_parameters() if "dec" in n and p.requires_grad],
                 "lr": args.decoder_learning_rate,
             },
         ]
@@ -269,7 +269,7 @@ def main(args):
 
     scheduler = get_scheduler(optimizer, len(train_loader), args)
     model = model.cuda()
-    model = DistributedDataParallel(model, device_ids=[args.local_rank], broadcast_buffers=False)
+    model = DistributedDataParallel(model, device_ids=[args.local_rank], broadcast_buffers=False, find_unused_parameters=True)
 
     if args.checkpoint_path:
         assert os.path.isfile(args.checkpoint_path)
